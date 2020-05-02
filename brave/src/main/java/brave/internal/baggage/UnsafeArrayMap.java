@@ -18,8 +18,6 @@ import java.lang.reflect.Array;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
-import java.util.ListIterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -118,22 +116,17 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
   }
 
   int arrayIndexOfKey(Object o) {
-    return arrayIndexOfKey(o, 0, toIndex, false);
+    return arrayIndexOfKey(o, 0, toIndex);
   }
 
-  int arrayIndexOfKey(Object o, int fromIndex, int toIndex, boolean last) {
+  int arrayIndexOfKey(Object o, int fromIndex, int toIndex) {
     int result = -1;
     for (int i = fromIndex; i < toIndex; i += 2) {
       if (o.equals(array[i]) && !isSet(filteredKeys, i / 2)) {
-        if (!last) return i;
-        result = i;
+        return i;
       }
     }
     return result;
-  }
-
-  List<K> keyList() {
-    return size == 0 ? Collections.emptyList() : new KeyListView(0, toIndex);
   }
 
   @Override public Set<K> keySet() {
@@ -179,76 +172,6 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
 
     @Override public boolean contains(Object o) {
       return containsKey(o);
-    }
-  }
-
-  final class KeyListView extends CollectionView<K> implements List<K> {
-    KeyListView(int fromIndex, int toIndex) {
-      super(fromIndex, toIndex);
-    }
-
-    @Override K elementAtArrayIndex(int i) {
-      return (K) array[i];
-    }
-
-    @Override public K get(int index) {
-      int i = advancePastFiltered(index * 2);
-      if (i < 0 || i > toIndex) throw new IndexOutOfBoundsException();
-      return elementAtArrayIndex(i);
-    }
-
-    @Override public int indexOf(Object o) {
-      return arrayIndexOfKey(o, fromIndex, toIndex, false) / 2;
-    }
-
-    @Override public int lastIndexOf(Object o) {
-      return arrayIndexOfKey(o, fromIndex, toIndex, true) / 2;
-    }
-
-    @Override public ListIterator<K> listIterator() {
-      return iterator();
-    }
-
-    @Override public ListIterator<K> listIterator(int index) {
-      int i = advancePastFiltered(index * 2);
-      if (i < 0 || i > toIndex) throw new IndexOutOfBoundsException();
-      if (i == toIndex) return Collections.<K>emptyList().listIterator();
-      ReadOnlyIterator result = new ReadOnlyIterator();
-      result.i = i;
-      return result;
-    }
-
-    @Override public List<K> subList(int fromIndex, int toIndex) {
-      fromIndex = advancePastFiltered(fromIndex * 2);
-      toIndex = rewindBeforeFiltered(toIndex * 2);
-
-      if (fromIndex < this.fromIndex) throw new IndexOutOfBoundsException("fromIndex < 0");
-      if (toIndex > this.toIndex) throw new IndexOutOfBoundsException("toIndex > size");
-      if (fromIndex > toIndex) throw new IndexOutOfBoundsException("fromIndex > toIndex");
-      if (fromIndex == toIndex) return Collections.emptyList();
-      if (fromIndex == this.fromIndex && toIndex == this.toIndex) return this;
-
-      return new KeyListView(fromIndex, toIndex);
-    }
-
-    @Override public boolean contains(Object o) {
-      return containsKey(o);
-    }
-
-    @Override public K remove(int index) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override public boolean addAll(int index, Collection<? extends K> c) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override public K set(int index, K element) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override public void add(int index, K element) {
-      throw new UnsupportedOperationException();
     }
   }
 
@@ -299,18 +222,13 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
       return i;
     }
 
-    int rewindBeforeFiltered(int i) {
-      while (i > fromIndex && isFilteredKey(i)) i -= 2;
-      return i;
-    }
-
     @Override public int size() {
       return size;
     }
 
     abstract E elementAtArrayIndex(int i);
 
-    @Override public ListIterator<E> iterator() {
+    @Override public Iterator<E> iterator() {
       return new ReadOnlyIterator();
     }
 
@@ -332,7 +250,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
       return dest;
     }
 
-    final class ReadOnlyIterator implements ListIterator<E> {
+    final class ReadOnlyIterator implements Iterator<E> {
       int i = advancePastFiltered(fromIndex);
 
       @Override public boolean hasNext() {
@@ -347,38 +265,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
         return result;
       }
 
-      @Override public boolean hasPrevious() {
-        i = rewindBeforeFiltered(i);
-        return i > fromIndex;
-      }
-
-      @Override public E previous() {
-        if (!hasPrevious()) throw new NoSuchElementException();
-        E result = elementAtArrayIndex(i);
-        i -= 2;
-        return result;
-      }
-
-      @Override public int nextIndex() {
-        i = advancePastFiltered(i);
-        return (i + 2) / 2;
-      }
-
-      @Override public int previousIndex() {
-        if (i == 0) return -1;
-        i = rewindBeforeFiltered(i);
-        return i < fromIndex ? -1 : (i - 2) / 2;
-      }
-
       @Override public void remove() {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override public void set(E e) {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override public void add(E e) {
         throw new UnsupportedOperationException();
       }
     }

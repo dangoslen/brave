@@ -18,7 +18,9 @@ import brave.internal.Nullable;
 import brave.internal.Platform;
 import brave.propagation.TraceContext;
 import brave.propagation.TraceContextOrSamplingFlags;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -47,9 +49,13 @@ public final class ExtraBaggageFields extends Extra<ExtraBaggageFields, ExtraBag
 
   /** The list of fields present, regardless of value. */
   public List<BaggageField> getAllFields() {
-    return factory.isDynamic
-        ? UnsafeArrayMap.<BaggageField, String>create(array()).keyList()
-        : factory.initialFieldList;
+    if (!factory.isDynamic) return factory.initialFieldList;
+    Object[] array = array();
+    List<BaggageField> result = new ArrayList<>(array.length / 2);
+    for (int i = 0; i < array.length; i += 2) {
+      result.add((BaggageField) array[i]);
+    }
+    return Collections.unmodifiableList(result);
   }
 
   /** Returns a read-only view of the non-null baggage field values */
