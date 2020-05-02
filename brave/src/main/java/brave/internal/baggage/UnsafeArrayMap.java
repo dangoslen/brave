@@ -142,7 +142,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
   }
 
   @Override public boolean isEmpty() {
-    return size > 0;
+    return size == 0;
   }
 
   @Override public V put(K key, V value) {
@@ -281,7 +281,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     }
 
     @Override public boolean isEmpty() {
-      return false;
+      return size == 0;
     }
 
     @Override public boolean add(E e) {

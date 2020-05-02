@@ -254,6 +254,14 @@ public class UnsafeArrayMapTest {
     assertThat(map.keySet()).hasSize(size);
     assertThat(map.values()).hasSize(size);
     assertThat(map.entrySet()).hasSize(size);
+    boolean isEmpty = size == 0;
+    assertThat(map.isEmpty()).isEqualTo(isEmpty);
+    assertThat(map.keySet().isEmpty()).isEqualTo(isEmpty);
+    assertThat(map.values().isEmpty()).isEqualTo(isEmpty);
+    assertThat(map.entrySet().isEmpty()).isEqualTo(isEmpty);
+    assertThat(map.keySet().iterator().hasNext()).isEqualTo(!isEmpty);
+    assertThat(map.values().iterator().hasNext()).isEqualTo(!isEmpty);
+    assertThat(map.entrySet().iterator().hasNext()).isEqualTo(!isEmpty);
   }
 
   /**
