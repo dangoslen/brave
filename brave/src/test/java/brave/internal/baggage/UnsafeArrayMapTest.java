@@ -146,6 +146,14 @@ public class UnsafeArrayMapTest {
     assertThat(map).isSameAs(Collections.emptyMap());
   }
 
+  @Test public void filter_tooMany() {
+    String[] tooManyKeys = new String[65];
+
+    assertThatThrownBy(() -> UnsafeArrayMap.filterKeys(array, tooManyKeys))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("cannot filter more than 64 keys");
+  }
+
   @Test public void someFiltered() {
     array[0] = "1";
     array[1] = "one";

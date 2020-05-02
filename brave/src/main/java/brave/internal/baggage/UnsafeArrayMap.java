@@ -41,24 +41,23 @@ import static brave.internal.baggage.LongBitSet.setBit;
 class UnsafeArrayMap<K, V> implements Map<K, V> {
   static final int MAX_FILTERED_KEYS = LongBitSet.MAX_SIZE;
 
+  /**
+   * @param array pairwise array holding key values
+   */
   static <K, V> Map<K, V> create(Object[] array) {
-    if (array == null) throw new NullPointerException("array == null");
-    int i = 0;
-    for (; i < array.length; i += 2) {
-      Object key = array[i];
-      if (key == null) break; // we ignore anything starting at first null key
-    }
-    if (i == 0) return Collections.emptyMap();
-    return new UnsafeArrayMap<>(array, i, 0);
+    return filterKeys(array);
   }
 
-  /** Resets redaction based on the input. */
+  /**
+   * @param array pairwise array holding key values
+   * @param filteredKeys keys that won't be visible in the resulting method.
+   */
   static <K, V> Map<K, V> filterKeys(Object[] array, K... filteredKeys) {
     if (array == null) throw new NullPointerException("array == null");
-    if (filteredKeys == null || filteredKeys.length == 0) return create(array);
+    if (filteredKeys == null) throw new NullPointerException("filteredKeys == null");
 
     if (filteredKeys.length > MAX_FILTERED_KEYS) {
-      throw new IllegalArgumentException("cannot redact more than " + MAX_FILTERED_KEYS + " keys");
+      throw new IllegalArgumentException("cannot filter more than " + MAX_FILTERED_KEYS + " keys");
     }
 
     long filteredBitSet = 0;
@@ -334,14 +333,6 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
       result.append(array[i]).append('=').append(array[i + 1]);
     }
     return result.insert(0, "UnsafeArrayMap{").append("}").toString();
-  }
-
-  int calculateSize(int toIndex) {
-    int size = 0;
-    for (int i = 0; i < toIndex; i += 2) {
-      if (array[i] != null && !isFilteredKey(i)) size++;
-    }
-    return size;
   }
 
   boolean isFilteredKey(int i) {
