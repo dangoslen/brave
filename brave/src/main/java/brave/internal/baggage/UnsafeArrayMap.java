@@ -32,53 +32,50 @@ import static brave.internal.baggage.LongBitSet.setBit;
  * <p>The array is shared with the caller to {@link #create}, hence being called "unsafe".
  * This type supports cheap views over data using thread-local or copy-on-write arrays.
  *
+ * <p>An input with no keys coerces to {@link Collections#emptyMap()}.
+ *
  * <p>As this is an immutable view, operations like {@link #keySet()}, {@link #values()} and {@link
  * #entrySet()} might return constants. As expected, stateful objects such as {@link Iterator} will
  * never be shared.
  */
 class UnsafeArrayMap<K, V> implements Map<K, V> {
-  static final UnsafeArrayMap EMPTY_MAP = new UnsafeArrayMap(new Object[0], 0, 0);
-
   static final int MAX_FILTERED_KEYS = LongBitSet.MAX_SIZE;
 
-  static <K, V> UnsafeArrayMap<K, V> create(Object[] array) {
+  static <K, V> Map<K, V> create(Object[] array) {
     if (array == null) throw new NullPointerException("array == null");
     int i = 0;
     for (; i < array.length; i += 2) {
       Object key = array[i];
       if (key == null) break; // we ignore anything starting at first null key
     }
-    if (i == 0) return EMPTY_MAP;
+    if (i == 0) return Collections.emptyMap();
     return new UnsafeArrayMap<>(array, i, 0);
   }
 
   /** Resets redaction based on the input. */
-  Map<K, V> filterKeys(K... filteredKeys) {
-    if (filteredKeys == null || filteredKeys.length == 0) return this;
+  static <K, V> Map<K, V> filterKeys(Object[] array, K... filteredKeys) {
+    if (array == null) throw new NullPointerException("array == null");
+    if (filteredKeys == null || filteredKeys.length == 0) return create(array);
 
     if (filteredKeys.length > MAX_FILTERED_KEYS) {
       throw new IllegalArgumentException("cannot redact more than " + MAX_FILTERED_KEYS + " keys");
     }
 
     long filteredBitSet = 0;
-    boolean filteredAll = true;
-    int i = 0;
-    for (; i < toIndex; i += 2) {
+    int i = 0, numFiltered = 0;
+    for (; i < array.length; i += 2) {
       Object key = array[i];
-      boolean filtered = false;
+      if (key == null) break; // we ignore anything starting at first null key
       for (K filteredKey : filteredKeys) {
         if (filteredKey.equals(key)) {
           filteredBitSet = setBit(filteredBitSet, i / 2);
-          filtered = true;
+          numFiltered++;
           break;
         }
       }
-      if (filtered) continue;
-      filteredAll = false;
     }
-    if (filteredBitSet == 0) return this;
-    if (filteredAll) return EMPTY_MAP;
-    return new UnsafeArrayMap<>(array, toIndex, filteredBitSet);
+    if (numFiltered == i / 2) return Collections.emptyMap();
+    return new UnsafeArrayMap<>(array, i, filteredBitSet);
   }
 
   final Object[] array;
@@ -97,12 +94,11 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
   }
 
   @Override public boolean containsKey(Object o) {
-    if (o == null || size == 0) return false; // null keys are not allowed
+    if (o == null) return false; // null keys are not allowed
     return arrayIndexOfKey(o) != -1;
   }
 
   @Override public boolean containsValue(Object o) {
-    if (size == 0) return false;
     for (int i = 0; i < toIndex; i += 2) {
       if (equal(o, array[i + 1]) && !isSet(filteredKeys, i / 2)) return true;
     }
@@ -110,18 +106,14 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
   }
 
   @Override public V get(Object o) {
-    if (o == null || size == 0) return null; // null keys are not allowed
+    if (o == null) return null; // null keys are not allowed
     int i = arrayIndexOfKey(o);
     return i != -1 ? (V) array[i + 1] : null;
   }
 
   int arrayIndexOfKey(Object o) {
-    return arrayIndexOfKey(o, 0, toIndex);
-  }
-
-  int arrayIndexOfKey(Object o, int fromIndex, int toIndex) {
     int result = -1;
-    for (int i = fromIndex; i < toIndex; i += 2) {
+    for (int i = 0; i < toIndex; i += 2) {
       if (o.equals(array[i]) && !isSet(filteredKeys, i / 2)) {
         return i;
       }
@@ -130,19 +122,19 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
   }
 
   @Override public Set<K> keySet() {
-    return size == 0 ? Collections.emptySet() : new KeySetView();
+    return new KeySetView();
   }
 
   @Override public Collection<V> values() {
-    return size == 0 ? Collections.emptyList() : new ValuesView();
+    return new ValuesView();
   }
 
   @Override public Set<Map.Entry<K, V>> entrySet() {
-    return size == 0 ? Collections.emptySet() : new EntrySetView();
+    return new EntrySetView();
   }
 
   @Override public boolean isEmpty() {
-    return size == 0;
+    return false;
   }
 
   @Override public V put(K key, V value) {
@@ -161,11 +153,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     throw new UnsupportedOperationException();
   }
 
-  final class KeySetView extends CollectionView<K> implements Set<K> {
-    KeySetView() {
-      super(0, UnsafeArrayMap.this.toIndex);
-    }
-
+  final class KeySetView extends SetView<K> {
     @Override K elementAtArrayIndex(int i) {
       return (K) array[i];
     }
@@ -175,11 +163,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     }
   }
 
-  final class ValuesView extends CollectionView<V> {
-    ValuesView() {
-      super(0, UnsafeArrayMap.this.toIndex);
-    }
-
+  final class ValuesView extends SetView<V> {
     @Override V elementAtArrayIndex(int i) {
       return (V) array[i + 1];
     }
@@ -189,11 +173,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     }
   }
 
-  final class EntrySetView extends CollectionView<Map.Entry<K, V>> implements Set<Map.Entry<K, V>> {
-    EntrySetView() {
-      super(0, UnsafeArrayMap.this.toIndex);
-    }
-
+  final class EntrySetView extends SetView<Map.Entry<K, V>> {
     @Override Map.Entry<K, V> elementAtArrayIndex(int i) {
       return new Entry<>((K) array[i], (V) array[i + 1]);
     }
@@ -201,22 +181,13 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     @Override public boolean contains(Object o) {
       if (!(o instanceof Map.Entry) || ((Map.Entry) o).getKey() == null) return false;
       Map.Entry that = (Map.Entry) o;
-      for (int i = 0; i < toIndex; i += 2) {
-        if (that.getKey().equals(array[i]) && equal(that.getValue(), array[i + 1])) return true;
-      }
-      return false;
+      int i = arrayIndexOfKey(that.getKey());
+      if (i == -1) return false;
+      return equal(that.getValue(), array[i + 1]);
     }
   }
 
-  abstract class CollectionView<E> implements Collection<E> {
-    final int fromIndex, toIndex, size;
-
-    protected CollectionView(int fromIndex, int toIndex) {
-      this.fromIndex = fromIndex;
-      this.toIndex = toIndex;
-      this.size = calculateSize(fromIndex, toIndex);
-    }
-
+  abstract class SetView<E> implements Set<E> {
     int advancePastFiltered(int i) {
       while (i < toIndex && isFilteredKey(i)) i += 2;
       return i;
@@ -226,6 +197,11 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
       return size;
     }
 
+    /**
+     * By abstracting this, {@link #keySet()} {@link #values()} and {@link #entrySet()} only
+     * implement need implement two methods based on {@link #<E>}: this method and and {@link
+     * #contains(Object)}.
+     */
     abstract E elementAtArrayIndex(int i);
 
     @Override public Iterator<E> iterator() {
@@ -243,7 +219,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     }
 
     <T> T[] copyTo(T[] dest) {
-      for (int i = fromIndex, d = 0; i < toIndex; i += 2) {
+      for (int i = 0, d = 0; i < toIndex; i += 2) {
         if (isFilteredKey(i)) continue;
         dest[d++] = (T) elementAtArrayIndex(i);
       }
@@ -251,7 +227,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     }
 
     final class ReadOnlyIterator implements Iterator<E> {
-      int i = advancePastFiltered(fromIndex);
+      int i = advancePastFiltered(0);
 
       @Override public boolean hasNext() {
         i = advancePastFiltered(i);
@@ -281,7 +257,7 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     }
 
     @Override public boolean isEmpty() {
-      return size == 0;
+      return false;
     }
 
     @Override public boolean add(E e) {
@@ -360,9 +336,9 @@ class UnsafeArrayMap<K, V> implements Map<K, V> {
     return result.insert(0, "UnsafeArrayMap{").append("}").toString();
   }
 
-  int calculateSize(int fromIndex, int toIndex) {
+  int calculateSize(int toIndex) {
     int size = 0;
-    for (int i = fromIndex; i < toIndex; i += 2) {
+    for (int i = 0; i < toIndex; i += 2) {
       if (array[i] != null && !isFilteredKey(i)) size++;
     }
     return size;

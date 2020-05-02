@@ -60,7 +60,7 @@ public final class ExtraBaggageFields extends Extra<ExtraBaggageFields, ExtraBag
 
   /** Returns a read-only view of the non-null baggage field values */
   public Map<BaggageField, String> toMapFilteringFields(BaggageField... filtered) {
-    return UnsafeArrayMap.<BaggageField, String>create(array()).filterKeys(filtered);
+    return UnsafeArrayMap.filterKeys(array(), filtered);
   }
 
   /**

@@ -14,6 +14,7 @@
 package brave.internal.baggage;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -30,9 +31,7 @@ public class UnsafeArrayMapTest {
 
   @Test public void empty() {
     Map<String, String> map = UnsafeArrayMap.create(array);
-    assertThat(map).isSameAs(UnsafeArrayMap.EMPTY_MAP);
-    assertSize(map, 0);
-    assertBaseCase(map);
+    assertThat(map).isSameAs(Collections.emptyMap());
   }
 
   @Test public void noNullValues() {
@@ -143,9 +142,8 @@ public class UnsafeArrayMapTest {
     array[4] = "3";
     array[5] = "three";
 
-    Map<String, String> map =
-        UnsafeArrayMap.<String, String>create(array).filterKeys("1", "2", "3");
-    assertThat(map).isSameAs(UnsafeArrayMap.EMPTY_MAP);
+    Map<String, String> map = UnsafeArrayMap.filterKeys(array, "1", "2", "3");
+    assertThat(map).isSameAs(Collections.emptyMap());
   }
 
   @Test public void someFiltered() {
@@ -156,8 +154,7 @@ public class UnsafeArrayMapTest {
     array[4] = "3";
     array[5] = "three";
 
-    Map<String, String> map =
-        UnsafeArrayMap.<String, String>create(array).filterKeys("1", "3");
+    Map<String, String> map = UnsafeArrayMap.filterKeys(array, "1", "3");
     assertSize(map, 1);
     assertBaseCase(map);
 
@@ -254,14 +251,13 @@ public class UnsafeArrayMapTest {
     assertThat(map.keySet()).hasSize(size);
     assertThat(map.values()).hasSize(size);
     assertThat(map.entrySet()).hasSize(size);
-    boolean isEmpty = size == 0;
-    assertThat(map.isEmpty()).isEqualTo(isEmpty);
-    assertThat(map.keySet().isEmpty()).isEqualTo(isEmpty);
-    assertThat(map.values().isEmpty()).isEqualTo(isEmpty);
-    assertThat(map.entrySet().isEmpty()).isEqualTo(isEmpty);
-    assertThat(map.keySet().iterator().hasNext()).isEqualTo(!isEmpty);
-    assertThat(map.values().iterator().hasNext()).isEqualTo(!isEmpty);
-    assertThat(map.entrySet().iterator().hasNext()).isEqualTo(!isEmpty);
+    assertThat(map.isEmpty()).isEqualTo(false);
+    assertThat(map.keySet().isEmpty()).isEqualTo(false);
+    assertThat(map.values().isEmpty()).isEqualTo(false);
+    assertThat(map.entrySet().isEmpty()).isEqualTo(false);
+    assertThat(map.keySet().iterator().hasNext()).isEqualTo(true);
+    assertThat(map.values().iterator().hasNext()).isEqualTo(true);
+    assertThat(map.entrySet().iterator().hasNext()).isEqualTo(true);
   }
 
   /**

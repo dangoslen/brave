@@ -52,7 +52,7 @@ final class SingleHeaderCodec implements BaggageCodec {
     boolean decoded = false;
     for (String entry : value.split(",")) {
       String[] keyValue = entry.split("=", 2);
-      if (extra.updateValue(BaggageField.create(keyValue[0]), keyValue[1])) decoded = true;
+      if (BaggageField.create(keyValue[0]).updateValue(keyValue[1])) decoded = true;
     }
     return decoded;
   }
