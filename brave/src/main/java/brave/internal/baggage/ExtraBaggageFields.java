@@ -15,42 +15,46 @@ package brave.internal.baggage;
 
 import brave.baggage.BaggageField;
 import brave.internal.Nullable;
+import brave.internal.Platform;
 import brave.propagation.TraceContext;
 import brave.propagation.TraceContextOrSamplingFlags;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+
+import static brave.internal.baggage.ExtraBaggageFieldsFactory.MAX_DYNAMIC_FIELDS;
+import static brave.internal.baggage.LongBitSet.isSet;
+import static brave.internal.baggage.LongBitSet.setBit;
+import static brave.internal.baggage.LongBitSet.unsetBit;
 
 /**
  * Holds one or more baggage fields in {@link TraceContext#extra()} or {@link
  * TraceContextOrSamplingFlags#extra()}.
- *
- * <p>We need to retain propagation state extracted from headers. However, we don't know the trace
- * identifiers, yet. In order to resolve this ordering concern, we create an object to hold extra
- * state, and defer associating it with a span ID (via {@link ExtraBaggageFieldsFactory#decorate(TraceContext)}.
- *
- * <p>The implementation of this type uses copy-on-write semantics to prevent changes in a
- * child context from affecting its parent.
  */
-// We handle dynamic vs fixed state internally as it..
-//  * hides generic type complexity
-//  * gives us a lock not exposed to users
-//  * allows findExtra(ExtraBaggageFields.class)
-public final class ExtraBaggageFields {
-  final State<?> internal; // compared by reference to ensure same configuration
-  long traceId;
-  long spanId; // guarded by stateHandler
+public final class ExtraBaggageFields extends Extra<ExtraBaggageFields, ExtraBaggageFieldsFactory> {
+  ExtraBaggageFields(ExtraBaggageFieldsFactory factory) {
+    super(factory);
+  }
 
-  ExtraBaggageFields(State<?> internal) {
-    this.internal = internal;
+  Object[] array() {
+    return (Object[]) state();
   }
 
   /** When true, calls to {@link #getAllFields()} cannot be cached. */
   public boolean isDynamic() {
-    return internal.isDynamic();
+    return factory.isDynamic;
   }
 
   /** The list of fields present, regardless of value. */
   public List<BaggageField> getAllFields() {
-    return internal.getAllFields();
+    return factory.isDynamic
+        ? UnsafeArrayMap.<BaggageField, String>create(array()).keyList()
+        : factory.initialFieldList;
+  }
+
+  /** Returns a read-only view of the non-null baggage field values */
+  public Map<BaggageField, String> toMapFilteringFields(BaggageField... filtered) {
+    return UnsafeArrayMap.<BaggageField, String>create(array()).filterKeys(filtered);
   }
 
   /**
@@ -60,7 +64,20 @@ public final class ExtraBaggageFields {
    * @see BaggageField#getValue(TraceContextOrSamplingFlags)
    */
   @Nullable public String getValue(BaggageField field) {
-    return internal.getValue(field);
+    if (field == null) return null;
+    Object[] state = array();
+    int i = indexOfField(state, field);
+    return i != -1 ? (String) state[i + 1] : null;
+  }
+
+  int indexOfField(Object[] state, BaggageField field) {
+    Integer index = factory.initialFieldIndices.get(field);
+    if (index != null) return index;
+    for (int i = factory.initialArrayLength; i < state.length; i += 2) {
+      if (state[i] == null) break; // end of keys
+      if (field.equals(state[i])) return i;
+    }
+    return -1;
   }
 
   /**
@@ -73,65 +90,114 @@ public final class ExtraBaggageFields {
    * @see BaggageField#updateValue(TraceContextOrSamplingFlags, String)
    */
   public boolean updateValue(BaggageField field, @Nullable String value) {
-    return internal.updateValue(field, value);
-  }
-
-  static abstract class State<S> {
-    final ExtraBaggageFieldsFactory factory;
-    volatile S state; // guarded by this, copy on write, never null
-
-    State(ExtraBaggageFieldsFactory factory, S parentState) {
-      if (factory == null) throw new NullPointerException("factory == null");
-      if (parentState == null) throw new NullPointerException("parentState == null");
-      this.factory = factory;
-      this.state = parentState;
-    }
-
-    /** @see ExtraBaggageFields#isDynamic() */
-    abstract boolean isDynamic();
-
-    /** @see ExtraBaggageFields#getAllFields() */
-    abstract List<BaggageField> getAllFields();
-
-    /** @see ExtraBaggageFields#getValue(BaggageField) */
-    abstract @Nullable String getValue(BaggageField field);
-
-    /** @see ExtraBaggageFields#updateValue(BaggageField, String) */
-    abstract boolean updateValue(BaggageField field, @Nullable String value);
-
-    /**
-     * For each field in the input replace the state if the key doesn't already exist.
-     *
-     * <p>Note: this does not synchronize internally as it is acting on newly constructed fields
-     * not yet returned to a caller.
-     */
-    abstract void mergeStateKeepingOursOnConflict(ExtraBaggageFields parent);
-  }
-
-  /** Fields are extracted before a context is created. We need to lazy set the context */
-  boolean tryToClaim(long traceId, long spanId) {
-    synchronized (internal) {
-      if (this.traceId == 0L) {
-        this.traceId = traceId;
-        this.spanId = spanId;
-        return true;
+    if (field == null) return false;
+    int updateAttempts = 3; // prevent spinning or bugs from killing things
+    while (updateAttempts > 0) {
+      Object[] state = array();
+      int i = indexOfField(state, field);
+      if (i != -1) {
+        if (equal(value, state[i + 1])) return false;
+        // We have the same field, just a different value
+        if (tryUpdateValue(state, i, value)) return true;
+        updateAttempts--;
+        continue;
       }
-      return this.traceId == traceId && this.spanId == spanId;
+
+      // When we reach here, there's a new field, but we may not have a policy
+      // grow, or we may have reached the maximum allowed field count.
+      if (!isDynamic()) return false; // this policy does not allow new fields.
+      if (tryAddNewField(state, field, value)) return true;
+
+      updateAttempts--;
     }
+
+    Platform.get().log("Failed to update %s", field, null);
+    return false;
   }
 
-  // Implemented for equals when no baggage was extracted
-  @Override public boolean equals(Object o) {
-    if (o == this) return true;
-    if (!(o instanceof ExtraBaggageFields)) return false;
-    return internal.equals(((ExtraBaggageFields) o).internal);
+  @Override protected Object[] mergeStateKeepingOursOnConflict(ExtraBaggageFields theirFields) {
+    Object[] ourArray = array(), theirArray = theirFields.array();
+
+    // scan first to see if we need to change our values, grow our array, or neither
+    long changeInOurs = 0, newToOurs = 0;
+    for (int i = 0; i < theirArray.length; i += 2) {
+      if (theirArray[i] == null) break; // end of keys
+      int ourIndex = indexOfField(ourArray, (BaggageField) theirArray[i]);
+      int bitsetIndex = i / 2;
+      if (ourIndex == -1) {
+        newToOurs = setBit(newToOurs, bitsetIndex);
+      } else {
+        Object ourValue = ourArray[ourIndex + 1];
+        if (ourValue != null) continue; // our ourArray wins
+        if (!equal(ourArray[ourIndex + 1], theirArray[i + 1])) {
+          changeInOurs = setBit(changeInOurs, bitsetIndex);
+        }
+      }
+    }
+
+    if (changeInOurs == 0 && newToOurs == 0) return ourArray;
+
+    // To implement copy-on-write, we provision a new array large enough for all changes.
+    int newArrayLength = ourArray.length + LongBitSet.size(newToOurs) * 2;
+    if (newArrayLength / 2 > MAX_DYNAMIC_FIELDS) {
+      Platform.get().log("Ignoring request to add > %s dynamic fields", MAX_DYNAMIC_FIELDS, null);
+      newToOurs = 0;
+    }
+    Object[] newState = Arrays.copyOf(ourArray, newArrayLength);
+
+    // Now, we iterate through all changes and apply them
+    int endOfOurs = ourArray.length;
+    for (int i = 0; i < theirArray.length; i += 2) {
+      if (theirArray[i] == null) break; // end of keys
+      int bitsetIndex = i / 2;
+      if (isSet(changeInOurs, bitsetIndex)) {
+        changeInOurs = unsetBit(changeInOurs, bitsetIndex);
+        int ourIndex = indexOfField(newState, (BaggageField) theirArray[i]);
+        newState[ourIndex + 1] = theirArray[i + 1];
+      } else if (isSet(newToOurs, bitsetIndex)) {
+        newToOurs = unsetBit(newToOurs, bitsetIndex);
+        newState[endOfOurs] = theirArray[i];
+        newState[endOfOurs + 1] = theirArray[i + 1];
+        endOfOurs += 2;
+      }
+      if (changeInOurs == 0 && newToOurs == 0) break;
+    }
+    return newState;
   }
 
-  @Override public int hashCode() {
-    return internal.hashCode();
+  /**
+   * It is important to note that fields are append-only. Knowing this, any lost race attempting to
+   * update an existing value can easily retried by comparing against the current index.
+   */
+  boolean tryUpdateValue(Object[] state, int i, @Nullable String value) {
+    Object[] newState = Arrays.copyOf(state, state.length); // copy-on-write
+    newState[i + 1] = value;
+    return factory.compareAndSetState(this, state, newState);
   }
 
-  static boolean equal(@Nullable Object a, @Nullable Object b) {
-    return a == null ? b == null : a.equals(b); // Java 6 can't use Objects.equals()
+  /** Grows the array to append a  new field/value pair. */
+  boolean tryAddNewField(Object[] state, BaggageField field, @Nullable String value) {
+    int newIndex = state.length;
+    int newArrayLength = newIndex + 2;
+    if (newArrayLength / 2 > MAX_DYNAMIC_FIELDS) {
+      Platform.get().log("Ignoring request to add > %s dynamic fields", MAX_DYNAMIC_FIELDS, null);
+      return false;
+    }
+    Object[] newState = Arrays.copyOf(state, newArrayLength); // copy-on-write
+    newState[newIndex] = field;
+    newState[newIndex + 1] = value;
+    return factory.compareAndSetState(this, state, newState);
+  }
+
+  @Override protected boolean stateEquals(Object thatState) {
+    return Arrays.equals(array(), (Object[]) thatState);
+  }
+
+  @Override protected int stateHashCode() {
+    return Arrays.hashCode(array());
+  }
+
+  @Override protected String stateString() {
+    return Arrays.toString(array());
   }
 }

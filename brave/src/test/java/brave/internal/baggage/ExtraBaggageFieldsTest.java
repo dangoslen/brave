@@ -39,7 +39,7 @@ public abstract class ExtraBaggageFieldsTest {
   @Test public void updateValue() {
     extra.updateValue(field1, "1");
     assertThat(extra.getValue(field1)).isEqualTo("1");
-    assertThat(isStateEmpty(extra.internal.state)).isFalse();
+    assertThat(isStateEmpty(extra.array())).isFalse();
   }
 
   @Test public void updateValue_multiple() {
@@ -51,28 +51,28 @@ public abstract class ExtraBaggageFieldsTest {
     extra.updateValue(field1, null);
     assertThat(extra.getValue(field1)).isNull();
     assertThat(extra.getValue(field2)).isEqualTo("2");
-    assertThat(isStateEmpty(extra.internal.state)).isFalse();
+    assertThat(isStateEmpty(extra.array())).isFalse();
 
     extra.updateValue(field2, null);
     assertThat(extra.getValue(field1)).isNull();
     assertThat(extra.getValue(field2)).isNull();
-    assertThat(isStateEmpty(extra.internal.state)).isTrue();
+    assertThat(isStateEmpty(extra.array())).isTrue();
   }
 
   @Test public void updateValue_null_clearsState() {
     extra.updateValue(field1, "1");
     extra.updateValue(field1, null);
-    assertThat(isStateEmpty(extra.internal.state)).isTrue();
+    assertThat(isStateEmpty(extra.array())).isTrue();
   }
 
   @Test public void updateValueNoop() {
     extra.updateValue(field1, null);
-    assertThat(isStateEmpty(extra.internal.state)).isTrue();
+    assertThat(isStateEmpty(extra.array())).isTrue();
 
     extra.updateValue(field1, "1");
-    Object before = extra.internal.state;
+    Object before = extra.array();
     extra.updateValue(field1, "1");
-    assertThat(extra.internal.state).isSameAs(before);
+    assertThat(extra.array()).isSameAs(before);
   }
 
   @Test public void getValue_ignored_if_unconfigured() {
@@ -89,20 +89,20 @@ public abstract class ExtraBaggageFieldsTest {
   }
 
   @Test public void mergeStateKeepingOursOnConflict_bothEmpty() {
-    Object before = extra.internal.state;
-    extra.internal.mergeStateKeepingOursOnConflict(extra2);
-    assertThat(before).isSameAs(extra.internal.state);
+    Object before = extra.array();
+    extra.mergeStateKeepingOursOnConflict(extra2);
+    assertThat(before).isSameAs(extra.array());
 
-    assertThat(isStateEmpty(extra.internal.state)).isTrue();
+    assertThat(isStateEmpty(extra.array())).isTrue();
   }
 
   @Test public void mergeStateKeepingOursOnConflict_empty_nonEmpty() {
     extra2.updateValue(field1, "1");
     extra2.updateValue(field2, "2");
 
-    Object before = extra.internal.state;
-    extra.internal.mergeStateKeepingOursOnConflict(extra2);
-    assertThat(before).isNotSameAs(extra.internal.state);
+    Object before = extra.array();
+    Object[] result = extra.mergeStateKeepingOursOnConflict(extra2);
+    factory.compareAndSetState(extra, before, result);
 
     assertThat(extra.getValue(field1)).isEqualTo("1");
     assertThat(extra.getValue(field2)).isEqualTo("2");
@@ -112,9 +112,9 @@ public abstract class ExtraBaggageFieldsTest {
     extra.updateValue(field1, "1");
     extra.updateValue(field2, "2");
 
-    Object before = extra.internal.state;
-    extra.internal.mergeStateKeepingOursOnConflict(extra2);
-    assertThat(before).isSameAs(extra.internal.state);
+    Object before = extra.array();
+    extra.mergeStateKeepingOursOnConflict(extra2);
+    assertThat(before).isSameAs(extra.array());
 
     assertThat(extra.getValue(field1)).isEqualTo("1");
     assertThat(extra.getValue(field2)).isEqualTo("2");
@@ -125,9 +125,9 @@ public abstract class ExtraBaggageFieldsTest {
     extra.updateValue(field2, "2");
     extra2.updateValue(field2, "2");
 
-    Object before = extra.internal.state;
-    extra.internal.mergeStateKeepingOursOnConflict(extra2);
-    assertThat(before).isSameAs(extra.internal.state);
+    Object before = extra.array();
+    extra.mergeStateKeepingOursOnConflict(extra2);
+    assertThat(before).isSameAs(extra.array());
 
     assertThat(extra.getValue(field1)).isEqualTo("1");
     assertThat(extra.getValue(field2)).isEqualTo("2");
@@ -138,9 +138,9 @@ public abstract class ExtraBaggageFieldsTest {
     extra.updateValue(field2, "2");
     extra2.updateValue(field2, "1");
 
-    Object before = extra.internal.state;
-    extra.internal.mergeStateKeepingOursOnConflict(extra2);
-    assertThat(before).isSameAs(extra.internal.state);
+    Object before = extra.array();
+    extra.mergeStateKeepingOursOnConflict(extra2);
+    assertThat(before).isSameAs(extra.array());
 
     assertThat(extra.getValue(field1)).isEqualTo("1");
     assertThat(extra.getValue(field2)).isEqualTo("2");
@@ -174,5 +174,10 @@ public abstract class ExtraBaggageFieldsTest {
     assertThat(extra.hashCode()).isNotEqualTo(extra2.hashCode());
   }
 
-  abstract boolean isStateEmpty(Object state);
+  final boolean isStateEmpty(Object[] state) {
+    for (int i = 0; i < state.length; i += 2) {
+      if (state[i + 1] != null) return false;
+    }
+    return true;
+  }
 }

@@ -34,12 +34,13 @@ import zipkin2.reporter.Reporter;
 import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class ExtraBaggageFieldsFactoryTest {
+public class ExtraFactoryTest {
   BaggageField field1 = BaggageField.create("one");
   BaggageField field2 = BaggageField.create("two");
   String value1 = "1", value2 = "2", value3 = "3";
 
-  ExtraBaggageFieldsFactory factory = FixedBaggageFieldsFactory.create(asList(field1, field2));
+  ExtraBaggageFieldsFactory
+      factory = ExtraBaggageFieldsFactory.newFactory(asList(field1, field2), false);
 
   Propagation.Factory propagationFactory = new Propagation.Factory() {
     @Override public <K> Propagation<K> create(Propagation.KeyFactory<K> keyFactory) {
@@ -251,7 +252,7 @@ public class ExtraBaggageFieldsFactoryTest {
 
   @Test public void decorate_redundant() {
     ExtraBaggageFields alreadyClaimed = factory.create();
-    factory.tryToClaim(alreadyClaimed, context.traceId(), context.spanId());
+    alreadyClaimed.tryToClaim(context.traceId(), context.spanId());
 
     Map<List<Object>, List<Object>> inputToExpected = new LinkedHashMap<>();
     inputToExpected.put(asList(alreadyClaimed), asList(factory.create()));
@@ -270,11 +271,11 @@ public class ExtraBaggageFieldsFactoryTest {
   @Test public void decorate_forksWhenFieldsAlreadyClaimed() {
     TraceContext other = TraceContext.newBuilder().traceId(98L).spanId(99L).build();
     ExtraBaggageFields claimedByOther = factory.create();
-    factory.tryToClaim(claimedByOther, other.traceId(), other.spanId());
+    claimedByOther.tryToClaim(other.traceId(), other.spanId());
 
     Map<List<Object>, List<Object>> inputToExpected = new LinkedHashMap<>();
     inputToExpected.put(asList(claimedByOther), asList(factory.create()));
-    inputToExpected.put(asList(claimedByOther, 1L), asList(factory.create(), 1L));
+    inputToExpected.put(asList(claimedByOther, 1L), asList(1L, factory.create()));
     inputToExpected.put(asList(1L, claimedByOther), asList(1L, factory.create()));
 
     for (Entry<List<Object>, List<Object>> inputExpected : inputToExpected.entrySet()) {

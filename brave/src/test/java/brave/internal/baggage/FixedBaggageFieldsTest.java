@@ -22,10 +22,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class FixedBaggageFieldsTest extends ExtraBaggageFieldsTest {
   @Override ExtraBaggageFieldsFactory newFactory() {
-    return FixedBaggageFieldsFactory.create(asList(field1, field2));
+    return ExtraBaggageFieldsFactory.newFactory(asList(field1, field2), false);
   }
 
-  @Test public void getAllFields_areConstant() {
+  @Test public void getAllFields() {
     List<BaggageField> withNoValues = extra.getAllFields();
     extra.updateValue(field1, "1");
     extra.updateValue(field2, "3");
@@ -37,15 +37,6 @@ public class FixedBaggageFieldsTest extends ExtraBaggageFieldsTest {
   @Test public void putValue_ignores_if_not_defined() {
     extra.updateValue(field3, "1");
 
-    assertThat(isStateEmpty(extra.internal.state)).isTrue();
-  }
-
-  @Override boolean isStateEmpty(Object state) {
-    String[] valueArray = (String[]) state;
-    assertThat(valueArray).isNotNull();
-    for (String value : valueArray) {
-      if (value != null) return false;
-    }
-    return true;
+    assertThat(isStateEmpty(extra.array())).isTrue();
   }
 }
